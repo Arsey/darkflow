@@ -4,13 +4,25 @@ tfnet secondary (helper) methods
 from ..utils.loader import create_loader
 from time import time as timer
 import tensorflow as tf
-import numpy as np
 import sys
 import cv2
 import os
 import csv
+import skvideo.io
+import subprocess
 
 old_graph_msg = 'Resolving old graph def {} (no guarantee)'
+
+
+def get_fps_rate(path):
+    numerator, denominator = subprocess.check_output(
+        ['ffprobe',
+         '-v', '0',
+         '-select_streams', '0',
+         '-show_entries', 'stream=r_frame_rate',
+         '-of', 'default=noprint_wrappers=1:nokey=1',
+         path]).split()[0].split("/")
+    return round(float(numerator) / float(denominator))
 
 def build_train_op(self):
     self.framework.loss(self.out)
@@ -93,7 +105,7 @@ def camera(self):
         assert os.path.isfile(file), \
         'file {} does not exist'.format(file)
 
-    camera = cv2.VideoCapture(file)
+    camera = skvideo.io.VideoCapture(file)
 
     if file == 0:
         self.say('Press [ESC] to quit video')
@@ -119,15 +131,19 @@ def camera(self):
         height, width, _ = frame.shape
 
     if SaveVideo:
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
         if file == 0:#camera window
           fps = 1 / self._get_fps(frame)
           if fps < 1:
             fps = 1
         else:
-            fps = round(camera.get(cv2.CAP_PROP_FPS))
-        videoWriter = cv2.VideoWriter(
-            'output_{}'.format(file), fourcc, fps, (width, height))
+            fps = get_fps_rate(file)
+
+        output_file = 'output_{}'.format(file)
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+        videoWriter = skvideo.io.VideoWriter(output_file, fps=fps, frameSize=(width, height))
+        videoWriter.open()
 
     # buffers for demo in batch
     buffer_inp = list()
@@ -169,8 +185,7 @@ def camera(self):
                         single_out, img,frame_id = elapsed,csv_file=f,csv=writer,mask = fgmask,encoder=encoder,tracker=tracker,save=False)
                 if SaveVideo:
                     videoWriter.write(postprocessed)
-                if self.FLAGS.display :
-                    cv2.imshow('', postprocessed)
+
             # Clear Buffers
             buffer_inp = list()
             buffer_pre = list()
@@ -180,10 +195,6 @@ def camera(self):
             sys.stdout.write('{0:3.3f} FPS'.format(
                 elapsed / (timer() - start)))
             sys.stdout.flush()
-        if self.FLAGS.display :
-            choice = cv2.waitKey(1)
-            if choice == 27:
-                break
 
     sys.stdout.write('\n')
     if SaveVideo:
@@ -191,8 +202,6 @@ def camera(self):
     if self.FLAGS.csv :
         f.close()
     camera.release()
-    if self.FLAGS.display :
-        cv2.destroyAllWindows()
 
 def to_darknet(self):
     darknet_ckpt = self.darknet
